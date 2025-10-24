@@ -1,49 +1,90 @@
+/**
+ * React Fiber Complete Work - Complete Phase Implementation
+ *
+ * This module implements the "complete work" phase of React's reconciliation process.
+ * During this phase, React creates DOM nodes, processes props, and builds the
+ * complete DOM tree structure. This phase works bottom-up through the fiber tree.
+ *
+ * Key responsibilities:
+ * - Create DOM nodes for host components
+ * - Process and apply props to DOM elements
+ * - Build parent-child DOM relationships
+ * - Handle refs and side effects
+ * - Optimize with bailout conditions
+ *
+ * @module ReactFiberCompleteWork
+ */
+
 import {
   createTextInstance,
   createInstance,
   appendInitialChild,
   finalizeInitialChildren,
-  prepareUpdate
-} from 'react-dom-bindings/src/client/ReactDOMHostConfig';
+  prepareUpdate,
+} from "react-dom-bindings/src/client/ReactDOMHostConfig";
 import { NoFlags, Update, Ref } from "./ReactFiberFlags";
-import { HostComponent, HostRoot, HostText, FunctionComponent } from "./ReactWorkTags";
-import { NoLanes, mergeLanes } from './ReactFiberLane';
+import {
+  HostComponent,
+  HostRoot,
+  HostText,
+  FunctionComponent,
+} from "./ReactWorkTags";
+import { NoLanes, mergeLanes } from "./ReactFiberLane";
 
+/**
+ * Mark Ref
+ *
+ * Marks a fiber as having a ref that needs to be attached during commit phase.
+ *
+ * @param {Fiber} workInProgress - Fiber with ref to mark
+ */
 function markRef(workInProgress) {
   workInProgress.flags |= Ref;
 }
 /**
- * 把当前的完成的fiber所有的子节点对应的真实DOM都挂载到自己父parent真实DOM节点上
- * @param {*} parent 当前完成的fiber真实的DOM节点
- * @param {*} workInProgress 完成的fiber
+ * Append All Children
+ *
+ * Appends all child DOM nodes of the completed fiber to its parent DOM node.
+ * This function traverses the fiber tree and builds the actual DOM hierarchy
+ * by connecting child DOM elements to their parent.
+ *
+ * The traversal skips over component fibers (function/class components) and
+ * only processes host components (DOM elements) and text nodes.
+ *
+ * @param {Element} parent - Parent DOM node to append children to
+ * @param {Fiber} workInProgress - Completed fiber whose children should be appended
  */
 function appendAllChildren(parent, workInProgress) {
   let node = workInProgress.child;
+
   while (node) {
-    //如果子节点类型是一个原生节点或者是一个文件节点
+    // If child is a host component (DOM element) or text node, append it
     if (node.tag === HostComponent || node.tag === HostText) {
       appendInitialChild(parent, node.stateNode);
-      //如果第一个儿子不是一个原生节点，说明它可能是一个函数组件
     } else if (node.child !== null) {
+      // If child is a component (function/class), traverse to its children
       node = node.child;
       continue;
     }
+
+    // If we've processed all children of workInProgress, we're done
     if (node === workInProgress) {
       return;
     }
-    //如果当前的节点没有弟弟
+
+    // If current node has no sibling, go back up the tree
     while (node.sibling === null) {
       if (node.return === null || node.return === workInProgress) {
         return;
       }
-      //回到父节点
+      // Move back to parent node
       node = node.return;
     }
     node = node.sibling;
   }
 }
 function markUpdate(workInProgress) {
-  workInProgress.flags |= Update;//给当前的fiber添加更新的副作用
+  workInProgress.flags |= Update; //给当前的fiber添加更新的副作用
 }
 /**
  * 在fiber(button)的完成阶段准备更新DOM
@@ -53,8 +94,8 @@ function markUpdate(workInProgress) {
  * @param {*} newProps 新属性
  */
 function updateHostComponent(current, workInProgress, type, newProps) {
-  const oldProps = current.memoizedProps;//老的属性
-  const instance = workInProgress.stateNode;//老的DOM节点
+  const oldProps = current.memoizedProps; //老的属性
+  const instance = workInProgress.stateNode; //老的DOM节点
   //比较新老属性，收集属性的差异
   const updatePayload = prepareUpdate(instance, type, oldProps, newProps);
   //让原生组件的新fiber更新队列等于[]
@@ -82,7 +123,7 @@ export function completeWork(current, workInProgress) {
       //如果老fiber存在，并且老fiber上真实DOM节点，要走节点更新的逻辑
       if (current !== null && workInProgress.stateNode !== null) {
         updateHostComponent(current, workInProgress, type, newProps);
-        if (current.ref !== workInProgress.ref !== null) {
+        if ((current.ref !== workInProgress.ref) !== null) {
           markRef(workInProgress);
         }
       } else {
@@ -117,7 +158,10 @@ function bubbleProperties(completedWork) {
   //遍历当前fiber的所有子节点，把所有的子节的副作用，以及子节点的子节点的副作用全部合并
   let child = completedWork.child;
   while (child !== null) {
-    newChildLanes = mergeLanes(newChildLanes, mergeLanes(child.lanes, child.childLanes));
+    newChildLanes = mergeLanes(
+      newChildLanes,
+      mergeLanes(child.lanes, child.childLanes)
+    );
     subtreeFlags |= child.subtreeFlags;
     subtreeFlags |= child.flags;
     child = child.sibling;

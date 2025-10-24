@@ -5,12 +5,12 @@ import { NoLanes, mergeLanes, isSubsetOfLanes } from "./ReactFiberLane";
 export const UpdateState = 0;
 
 export function initialUpdateQueue(fiber) {
-  //创建一个新的更新队列
-  //pending其实是一个循环链接
+  // Create a new update queue
+  // pending is actually a circular linked list
   const queue = {
-    baseState: fiber.memoizedState, //本次更新前当前的fiber的状态,更新会其于它进行计算状态
-    firstBaseUpdate: null, //本次更新前该fiber上保存的上次跳过的更新链表头
-    lastBaseUpdate: null, //本次更新前该fiber上保存的上次跳过的更新链尾部
+    baseState: fiber.memoizedState, // The current fiber state before this update, updates will be calculated based on it
+    firstBaseUpdate: null, // The head of the previously skipped update linked list saved on this fiber before this update
+    lastBaseUpdate: null, // The tail of the previously skipped update linked list saved on this fiber before this update
     shared: {
       pending: null,
     },
@@ -23,77 +23,77 @@ export function createUpdate(lane) {
   return update;
 }
 export function enqueueUpdate(fiber, update, lane) {
-  //获取更新队列
+  // Get the update queue
   const updateQueue = fiber.updateQueue;
-  //获取共享队列
+  // Get the shared queue
   const sharedQueue = updateQueue.shared;
   return enqueueConcurrentClassUpdate(fiber, sharedQueue, update, lane);
 }
 /**
- * 根据老状态和更新队列中的更新计算最新的状态
- * @param {*} workInProgress 要计算的fiber
+ * Calculate the latest state based on the old state and updates in the update queue
+ * @param {*} workInProgress The fiber to be calculated
  */
 export function processUpdateQueue(workInProgress, nextProps, renderLanes) {
   const queue = workInProgress.updateQueue;
-  //老链表头
+  // Old linked list head
   let firstBaseUpdate = queue.firstBaseUpdate;
-  //老链表尾巴
+  // Old linked list tail
   let lastBaseUpdate = queue.lastBaseUpdate;
-  //新链表尾部
+  // New linked list tail
   const pendingQueue = queue.shared.pending;
-  //合并新老链表为单链表
+  // Merge new and old linked lists into a single linked list
   if (pendingQueue !== null) {
     queue.shared.pending = null;
-    //新链表尾部
+    // New linked list tail
     const lastPendingUpdate = pendingQueue;
-    //新链表尾部
+    // New linked list tail
     const firstPendingUpdate = lastPendingUpdate.next;
-    //把老链表剪断，变成单链表，循环链表变单链表
+    // Cut off the old linked list to make it a single linked list, circular linked list becomes single linked list
     lastPendingUpdate.next = null;
-    //如果没有老链表
+    // If there is no old linked list
     if (lastBaseUpdate === null) {
-      //指向新的链表头
+      // Point to the new linked list head
       firstBaseUpdate = firstPendingUpdate;
     } else {
       lastBaseUpdate.next = firstPendingUpdate;
     }
     lastBaseUpdate = lastPendingUpdate;
   }
-  //如果链表不为空firstBaseUpdate=>lastBaseUpdate
+  // If the linked list is not empty firstBaseUpdate=>lastBaseUpdate
   if (firstBaseUpdate !== null) {
-    //上次跳过的更新前的状态
+    // State before the last skipped update
     let newState = queue.baseState;
-    //尚未执行的更新的lane
+    // Lanes of updates that have not been executed yet
     let newLanes = NoLanes;
     let newBaseState = null;
     let newFirstBaseUpdate = null;
     let newLastBaseUpdate = null;
     let update = firstBaseUpdate; //updateA
     do {
-      //获取此更新车道
+      // Get the lane of this update
       const updateLane = update.lane;
-      //如果说updateLane不是renderLanes的子集的话，说明本次渲染不需要处理过个更新，就是需要跳过此更新
+      // If updateLane is not a subset of renderLanes, it means this render does not need to process this update, so this update needs to be skipped
       if (!isSubsetOfLanes(renderLanes, updateLane)) {
-        //把此更新克隆一份
+        // Clone this update
         const clone = {
           id: update.id,
           lane: updateLane,
           payload: update.payload,
         };
-        //说明新的跳过的base链表为空,说明当前这个更新是第一个跳过的更新
+        // If the new skipped base linked list is empty, it means the current update is the first skipped update
         if (newLastBaseUpdate === null) {
-          //让新的跳过的链表头和链表尾都指向这个第一次跳过的更新
+          // Let both the head and tail of the new skipped linked list point to this first skipped update
           newFirstBaseUpdate = newLastBaseUpdate = clone;
-          //计算保存新的baseState为此跳过更新时的state
+          // Calculate and save the new baseState as the state when this update is skipped
           newBaseState = newState; // ""
         } else {
           newLastBaseUpdate = newLastBaseUpdate.next = clone;
         }
-        //如果有跳过的更新，就把跳过的更新所在的赛道合并到newLanes,
-        //最后会把newLanes赋给fiber.lanes
+        // If there are skipped updates, merge the lanes of the skipped updates into newLanes,
+        // Finally, newLanes will be assigned to fiber.lanes
         newLanes = mergeLanes(newLanes, updateLane);
       } else {
-        //说明已经有跳过的更新了
+        // It means there are already skipped updates
         if (newLastBaseUpdate !== null) {
           const clone = {
             id: update.id,
@@ -106,7 +106,7 @@ export function processUpdateQueue(workInProgress, nextProps, renderLanes) {
       }
       update = update.next;
     } while (update);
-    //如果没能跳过的更新的话
+    // If there are no skipped updates
     if (!newLastBaseUpdate) {
       newBaseState = newState;
     }
@@ -114,14 +114,14 @@ export function processUpdateQueue(workInProgress, nextProps, renderLanes) {
     queue.firstBaseUpdate = newFirstBaseUpdate;
     queue.lastBaseUpdate = newLastBaseUpdate;
     workInProgress.lanes = newLanes;
-    //本次渲染完会判断，此fiber上还有没有不为0的lane,如果有，会再次渲染
+    // After this render is complete, it will check if there are any non-zero lanes on this fiber, and if so, it will render again
     workInProgress.memoizedState = newState;
   }
 }
 /**
  * state=0 update=>1 update=2
- * 根据老状态和更新计算新状态
- * @param {*} update 更新的对象其实有很多种类型
+ * Calculate new state based on old state and update
+ * @param {*} update The update object, there are actually many types
  * @param {*} prevState
  */
 function getStateFromUpdate(update, prevState, nextProps) {
@@ -141,7 +141,7 @@ function getStateFromUpdate(update, prevState, nextProps) {
 export function cloneUpdateQueue(current, workInProgress) {
   const workInProgressQueue = workInProgress.updateQueue;
   const currentQueue = current.updateQueue;
-  //如果新的队列和老的队列不是同一个对象的话
+  // If the new queue and the old queue are not the same object
   if (currentQueue === workInProgressQueue) {
     const clone = {
       baseState: currentQueue.baseState,

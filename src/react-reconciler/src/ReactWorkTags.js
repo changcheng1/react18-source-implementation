@@ -1,9 +1,26 @@
-//根Fiber的tag
-//每种虚拟DOM都会对应自己的fiber tag类型
-//后面我们会讲到组件，组件分类组件和函数组件，因为它们都是函数，刚开始的时候
-export const FunctionComponent = 0;//函数组件
-export const ClassComponent = 1; //类组件
-export const IndeterminateComponent = 2;
-export const HostRoot = 3; //容器根节点
-export const HostComponent = 5; //原生节点 span div h1
-export const HostText = 6; //纯文件节点
+/**
+ * React Work Tags - Fiber Node Type Definitions
+ *
+ * This module defines constants for different types of React fiber nodes.
+ * Each fiber node has a 'tag' property that identifies what kind of component
+ * or element it represents. This enables React to handle different node types
+ * appropriately during reconciliation and rendering.
+ *
+ * The tag system allows React to:
+ * - Determine how to process each fiber during work loops
+ * - Apply appropriate lifecycle methods and effects
+ * - Handle different rendering strategies for different component types
+ * - Optimize performance based on component characteristics
+ *
+ * @module ReactWorkTags
+ */
+
+// Component types
+export const FunctionComponent = 0; // Function components (hooks-based)
+export const ClassComponent = 1; // Class components (lifecycle-based)
+export const IndeterminateComponent = 2; // Components whose type is not yet determined
+
+// Host types (DOM-related)
+export const HostRoot = 3; // Root container node (div#root)
+export const HostComponent = 5; // Native DOM elements (span, div, h1, etc.)
+export const HostText = 6; // Text nodes (pure text content)

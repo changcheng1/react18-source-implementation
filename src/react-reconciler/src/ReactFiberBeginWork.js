@@ -1,3 +1,19 @@
+/**
+ * React Fiber Begin Work - Render Phase Implementation
+ *
+ * This module implements the "begin work" phase of React's reconciliation process.
+ * During this phase, React processes each fiber node, updates its state and props,
+ * and creates child fibers based on the new virtual DOM.
+ *
+ * Key responsibilities:
+ * - Process different types of components (host, function, class)
+ * - Reconcile children (create, update, delete child fibers)
+ * - Handle state updates and prop changes
+ * - Optimize rendering with bailout conditions
+ *
+ * @module ReactFiberBeginWork
+ */
+
 import {
   HostComponent,
   HostRoot,
@@ -15,18 +31,25 @@ import { renderWithHooks } from "react-reconciler/src/ReactFiberHooks";
 import { NoLane, NoLanes } from "./ReactFiberLane";
 
 /**
- * 根据新的虚拟DOM生成新的Fiber链表
- * @param {*} current 老的父Fiber
- * @param {*} workInProgress 新的你Fiber
- * @param {*} nextChildren 新的子虚拟DOM
+ * Reconcile Children
+ *
+ * Creates a new fiber child list based on the new virtual DOM. This function
+ * implements React's reconciliation algorithm (diffing) to determine what
+ * changes need to be made to the DOM.
+ *
+ * @param {Fiber|null} current - Current (old) parent fiber
+ * @param {Fiber} workInProgress - Work-in-progress (new) parent fiber
+ * @param {ReactElement|ReactElement[]|string|number} nextChildren - New child virtual DOM
  */
 function reconcileChildren(current, workInProgress, nextChildren) {
-  //如果此新fiber没有老fiber,说明此新fiber是新创建的
-  //如果此fiber没能对应的老fiber,说明此fiber是新创建的，如果这个父fiber是新的创建的，它的儿子们也肯定都是新创建的
   if (current === null) {
+    // If there's no current fiber, this is a mount (initial render)
+    // All children are new, so we use mountChildFibers which doesn't track side effects
     workInProgress.child = mountChildFibers(workInProgress, null, nextChildren);
   } else {
-    //如果说有老Fiber的话，做DOM-DIFF 拿老的子fiber链表和新的子虚拟DOM进行比较 ，进行最小化的更新
+    // If there's a current fiber, this is an update
+    // We need to diff the old child fiber list with new virtual DOM
+    // This enables minimal updates and proper side effect tracking
     workInProgress.child = reconcileChildFibers(
       workInProgress,
       current.child,

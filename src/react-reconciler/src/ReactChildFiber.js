@@ -1,3 +1,25 @@
+/**
+ * React Child Fiber - Reconciliation Algorithm Implementation
+ *
+ * This module implements React's reconciliation algorithm (also known as the "diffing" algorithm).
+ * It's responsible for comparing the current fiber tree with the new virtual DOM tree and
+ * determining what changes need to be made to efficiently update the DOM.
+ *
+ * Key concepts:
+ * - Reconciliation: Process of comparing old and new trees
+ * - Side effects: Tracking what DOM operations need to be performed
+ * - Keys: Used for efficient list reconciliation
+ * - Placement/Deletion flags: Mark fibers for DOM operations
+ *
+ * The reconciler handles:
+ * - Single element reconciliation
+ * - Array/list reconciliation with keys
+ * - Text node reconciliation
+ * - Deletion of removed elements
+ *
+ * @module ReactChildFiber
+ */
+
 import { REACT_ELEMENT_TYPE } from "shared/ReactSymbols";
 import {
   createFiberFromElement,
@@ -7,18 +29,47 @@ import {
 import { Placement, ChildDeletion } from "./ReactFiberFlags";
 import isArray from "shared/isArray";
 import { HostText } from "./ReactWorkTags";
+
 /**
- * @param {*} shouldTrackSideEffects 是否跟踪副作用
+ * Create Child Reconciler
+ *
+ * Factory function that creates a child reconciler with configurable side effect tracking.
+ * During mount phase, side effects aren't tracked since everything is new.
+ * During update phase, side effects are tracked to determine what DOM operations are needed.
+ *
+ * @param {boolean} shouldTrackSideEffects - Whether to track side effects (placement, deletion)
+ * @returns {Function} Reconciler function for processing children
  */
 function createChildReconciler(shouldTrackSideEffects) {
+  /**
+   * Use Fiber
+   *
+   * Reuses an existing fiber by creating a work-in-progress copy with new props.
+   * This is an optimization to avoid creating new fiber objects when possible.
+   *
+   * @param {Fiber} fiber - Existing fiber to reuse
+   * @param {any} pendingProps - New props for the fiber
+   * @returns {Fiber} Work-in-progress fiber
+   */
   function useFiber(fiber, pendingProps) {
     const clone = createWorkInProgress(fiber, pendingProps);
     clone.index = 0;
     clone.sibling = null;
     return clone;
   }
+
+  /**
+   * Delete Child
+   *
+   * Marks a child fiber for deletion during the commit phase.
+   * Adds the fiber to the parent's deletions array and sets the ChildDeletion flag.
+   *
+   * @param {Fiber} returnFiber - Parent fiber
+   * @param {Fiber} childToDelete - Child fiber to mark for deletion
+   */
   function deleteChild(returnFiber, childToDelete) {
     if (!shouldTrackSideEffects) return;
+
     const deletions = returnFiber.deletions;
     if (deletions === null) {
       returnFiber.deletions = [childToDelete];
@@ -27,9 +78,20 @@ function createChildReconciler(shouldTrackSideEffects) {
       returnFiber.deletions.push(childToDelete);
     }
   }
-  //删除从currentFirstChild之后所有的fiber节点
+
+  /**
+   * Delete Remaining Children
+   *
+   * Marks all remaining children starting from currentFirstChild for deletion.
+   * This is used when the new children list is shorter than the old one.
+   *
+   * @param {Fiber} returnFiber - Parent fiber
+   * @param {Fiber} currentFirstChild - First child to start deleting from
+   * @returns {null} Always returns null
+   */
   function deleteRemainingChildren(returnFiber, currentFirstChild) {
-    if (!shouldTrackSideEffects) return;
+    if (!shouldTrackSideEffects) return null;
+
     let childToDelete = currentFirstChild;
     while (childToDelete !== null) {
       deleteChild(returnFiber, childToDelete);
@@ -38,16 +100,26 @@ function createChildReconciler(shouldTrackSideEffects) {
     return null;
   }
   /**
+   * Reconcile Single Element
    *
-   * @param {*} returnFiber 根fiber div#root对应的fiber
-   * @param {*} currentFirstChild 老的FunctionComponent对应的fiber
-   * @param {*} element 新的虚拟DOM对象
-   * @returns 返回新的第一个子fiber
+   * Reconciles a single React element with the existing fiber tree. This function
+   * implements the core diffing logic for single elements, comparing keys and types
+   * to determine if a fiber can be reused or if a new one needs to be created.
+   *
+   * Algorithm:
+   * 1. Compare keys - if different, delete old fiber and create new one
+   * 2. Compare types - if same key but different type, delete old and create new
+   * 3. If key and type match, reuse existing fiber with new props
+   *
+   * @param {Fiber} returnFiber - Parent fiber (e.g., div#root fiber)
+   * @param {Fiber} currentFirstChild - Existing first child fiber
+   * @param {ReactElement} element - New virtual DOM element to reconcile
+   * @returns {Fiber} New or reused first child fiber
    */
   function reconcileSingleElement(returnFiber, currentFirstChild, element) {
-    //新的虚拟DOM的key,也就是唯一标准
-    const key = element.key; // null
-    let child = currentFirstChild; //老的FunctionComponent对应的fiber
+    // Get the key from new virtual DOM element (used for reconciliation)
+    const key = element.key;
+    let child = currentFirstChild;
     while (child !== null) {
       //判断此老fiber对应的key和新的虚拟DOM对象的key是否一样 null===null
       if (child.key === key) {

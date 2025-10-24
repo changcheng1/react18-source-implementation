@@ -1,12 +1,56 @@
-import { appendChild, insertBefore, commitUpdate, removeChild } from "react-dom-bindings/src/client/ReactDOMHostConfig";
-import { Placement, MutationMask, Update, Passive, LayoutMask, Ref } from "./ReactFiberFlags";
-import { FunctionComponent, HostComponent, HostRoot, HostText } from "./ReactWorkTags";
-import { HasEffect as HookHasEffect, Passive as HookPassive, Layout as HookLayout } from './ReactHookEffectTags';
+/**
+ * React Fiber Commit Work - Commit Phase Implementation
+ *
+ * This module implements the commit phase of React's reconciliation process.
+ * The commit phase is synchronous and applies all the side effects that were
+ * collected during the render phase to the actual DOM.
+ *
+ * The commit phase has three sub-phases:
+ * 1. Before Mutation: getSnapshotBeforeUpdate, async scheduling
+ * 2. Mutation: DOM insertions, updates, deletions
+ * 3. Layout: componentDidMount, componentDidUpdate, useLayoutEffect
+ *
+ * Key responsibilities:
+ * - Apply DOM mutations (insert, update, delete nodes)
+ * - Execute lifecycle methods and effects
+ * - Handle refs attachment/detachment
+ * - Manage focus and selection
+ *
+ * @module ReactFiberCommitWork
+ */
+
+import {
+  appendChild,
+  insertBefore,
+  commitUpdate,
+  removeChild,
+} from "react-dom-bindings/src/client/ReactDOMHostConfig";
+import {
+  Placement,
+  MutationMask,
+  Update,
+  Passive,
+  LayoutMask,
+  Ref,
+} from "./ReactFiberFlags";
+import {
+  FunctionComponent,
+  HostComponent,
+  HostRoot,
+  HostText,
+} from "./ReactWorkTags";
+import {
+  HasEffect as HookHasEffect,
+  Passive as HookPassive,
+  Layout as HookLayout,
+} from "./ReactHookEffectTags";
+
+// Global state for tracking the current host parent during commit
 let hostParent = null;
 /**
  * 提交删除副作用
- * @param {*} root 根节点 
- * @param {*} returnFiber 父fiber 
+ * @param {*} root 根节点
+ * @param {*} returnFiber 父fiber
  * @param {*} deletedFiber 删除的fiber
  */
 function commitDeletionEffects(root, returnFiber, deletedFiber) {
@@ -28,12 +72,20 @@ function commitDeletionEffects(root, returnFiber, deletedFiber) {
   commitDeletionEffectsOnFiber(root, returnFiber, deletedFiber);
   hostParent = null;
 }
-function commitDeletionEffectsOnFiber(finishedRoot, nearestMountedAncestor, deletedFiber) {
+function commitDeletionEffectsOnFiber(
+  finishedRoot,
+  nearestMountedAncestor,
+  deletedFiber
+) {
   switch (deletedFiber.tag) {
     case HostComponent:
     case HostText: {
       //当要删除一个节点的时候，要先删除它的子节点
-      recursivelyTraverseDeletionEffects(finishedRoot, nearestMountedAncestor, deletedFiber);
+      recursivelyTraverseDeletionEffects(
+        finishedRoot,
+        nearestMountedAncestor,
+        deletedFiber
+      );
       //再把自己删除
       if (hostParent !== null) {
         removeChild(hostParent, deletedFiber.stateNode);
@@ -44,7 +96,11 @@ function commitDeletionEffectsOnFiber(finishedRoot, nearestMountedAncestor, dele
       break;
   }
 }
-function recursivelyTraverseDeletionEffects(finishedRoot, nearestMountedAncestor, parent) {
+function recursivelyTraverseDeletionEffects(
+  finishedRoot,
+  nearestMountedAncestor,
+  parent
+) {
   let child = parent.child;
   while (child !== null) {
     commitDeletionEffectsOnFiber(finishedRoot, nearestMountedAncestor, child);
@@ -85,7 +141,7 @@ function commitReconciliationEffects(finishedWork) {
   }
 }
 function isHostParent(fiber) {
-  return fiber.tag === HostComponent || fiber.tag == HostRoot;//div#root
+  return fiber.tag === HostComponent || fiber.tag == HostRoot; //div#root
 }
 function getHostParentFiber(fiber) {
   let parent = fiber.return;
@@ -95,7 +151,7 @@ function getHostParentFiber(fiber) {
     }
     parent = parent.return;
   }
-  parent
+  parent;
 }
 
 /**
@@ -120,10 +176,10 @@ function insertOrAppendPlacementNode(node, before, parent) {
     const { child } = node;
     if (child !== null) {
       //把大儿子添加到父亲DOM节点里面去
-      insertOrAppendPlacementNode(child, before, parent)
+      insertOrAppendPlacementNode(child, before, parent);
       let { sibling } = child;
       while (sibling !== null) {
-        insertOrAppendPlacementNode(sibling, before, parent)
+        insertOrAppendPlacementNode(sibling, before, parent);
         sibling = sibling.sibling;
       }
     }
@@ -132,7 +188,7 @@ function insertOrAppendPlacementNode(node, before, parent) {
 /**
  * 找到要插入的锚点
  * 找到可以插在它的前面的那个fiber对应的真实DOM
- * @param {*} fiber 
+ * @param {*} fiber
  */
 function getHostSibling(fiber) {
   let node = fiber;
@@ -160,14 +216,14 @@ function getHostSibling(fiber) {
 }
 /**
  * 把此fiber的真实DOM插入到父DOM里
- * @param {*} finishedWork 
+ * @param {*} finishedWork
  */
 function commitPlacement(finishedWork) {
   const parentFiber = getHostParentFiber(finishedWork);
   switch (parentFiber.tag) {
     case HostRoot: {
       const parent = parentFiber.stateNode.containerInfo;
-      const before = getHostSibling(finishedWork);//获取最近的弟弟真实DOM节点
+      const before = getHostSibling(finishedWork); //获取最近的弟弟真实DOM节点
       insertOrAppendPlacementNode(finishedWork, before, parent);
       break;
     }
@@ -190,17 +246,16 @@ export function commitMutationEffectsOnFiber(finishedWork, root) {
   const current = finishedWork.alternate;
   const flags = finishedWork.flags;
   switch (finishedWork.tag) {
-    case FunctionComponent:
-      {
-        //先遍历它们的子节点，处理它们的子节点上的副作用
-        recursivelyTraverseMutationEffects(root, finishedWork);
-        //再处理自己身上的副作用
-        commitReconciliationEffects(finishedWork);
-        if (flags & Update) {
-          commitHookEffectListUnmount(HookHasEffect | HookLayout, finishedWork);
-        }
-        break;
+    case FunctionComponent: {
+      //先遍历它们的子节点，处理它们的子节点上的副作用
+      recursivelyTraverseMutationEffects(root, finishedWork);
+      //再处理自己身上的副作用
+      commitReconciliationEffects(finishedWork);
+      if (flags & Update) {
+        commitHookEffectListUnmount(HookHasEffect | HookLayout, finishedWork);
       }
+      break;
+    }
     case HostRoot:
     case HostText: {
       //先遍历它们的子节点，处理它们的子节点上的副作用
@@ -229,9 +284,15 @@ export function commitMutationEffectsOnFiber(finishedWork, root) {
           const updatePayload = finishedWork.updateQueue;
           finishedWork.updateQueue = null;
           if (updatePayload) {
-            commitUpdate(instance, updatePayload, type, oldProps, newProps, finishedWork);
+            commitUpdate(
+              instance,
+              updatePayload,
+              type,
+              oldProps,
+              newProps,
+              finishedWork
+            );
           }
-
         }
       }
       break;
@@ -244,7 +305,7 @@ function commitAttachRef(finishedWork) {
   const ref = finishedWork.ref;
   if (ref !== null) {
     const instance = finishedWork.stateNode;
-    if (typeof ref === 'function') {
+    if (typeof ref === "function") {
       ref(instance);
     } else {
       ref.current = instance;
@@ -264,8 +325,12 @@ function commitPassiveUnmountOnFiber(finishedWork) {
     }
     case FunctionComponent: {
       recursivelyTraversePassiveUnmountEffects(finishedWork);
-      if (flags & Passive) {//1024
-        commitHookPassiveUnmountEffects(finishedWork, HookHasEffect | HookPassive);
+      if (flags & Passive) {
+        //1024
+        commitHookPassiveUnmountEffects(
+          finishedWork,
+          HookHasEffect | HookPassive
+        );
       }
       break;
     }
@@ -299,7 +364,7 @@ function commitHookEffectListUnmount(flags, finishedWork) {
         }
       }
       effect = effect.next;
-    } while (effect !== firstEffect)
+    } while (effect !== firstEffect);
   }
 }
 export function commitPassiveMountEffects(root, finishedWork) {
@@ -314,8 +379,12 @@ function commitPassiveMountOnFiber(finishedRoot, finishedWork) {
     }
     case FunctionComponent: {
       recursivelyTraversePassiveMountEffects(finishedRoot, finishedWork);
-      if (flags & Passive) {//1024
-        commitHookPassiveMountEffects(finishedWork, HookHasEffect | HookPassive);
+      if (flags & Passive) {
+        //1024
+        commitHookPassiveMountEffects(
+          finishedWork,
+          HookHasEffect | HookPassive
+        );
       }
       break;
     }
@@ -347,7 +416,7 @@ function commitHookEffectListMount(flags, finishedWork) {
         effect.destroy = create();
       }
       effect = effect.next;
-    } while (effect !== firstEffect)
+    } while (effect !== firstEffect);
   }
 }
 
@@ -365,7 +434,8 @@ function commitLayoutEffectOnFiber(finishedRoot, current, finishedWork) {
     }
     case FunctionComponent: {
       recursivelyTraverseLayoutEffects(finishedRoot, finishedWork);
-      if (flags & LayoutMask) {// LayoutMask=Update=4
+      if (flags & LayoutMask) {
+        // LayoutMask=Update=4
         commitHookLayoutEffects(finishedWork, HookHasEffect | HookLayout);
       }
       break;
