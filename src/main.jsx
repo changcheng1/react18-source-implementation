@@ -15,17 +15,13 @@ import { createRoot } from "react-dom/client";
  * @returns {JSX.Element} A clickable div that displays and increments a counter
  */
 function FunctionComponent() {
-  const [numbers, setNumbers] = React.useState(2);
-
-  return (
-    <div
-      onClick={() => {
-        setNumbers(numbers + 1);
-      }}
-    >
-      {numbers}
-    </div>
-  );
+  const [numbers, setNumbers] = React.useReducer((state, action) => {
+    return state + action;
+  }, 0);
+  React.useEffect(() => {
+    console.log("numbers changed");
+  }, [numbers]);
+  return <div onClick={() => setNumbers(1)}>{numbers}</div>;
 }
 
 // Create root container and render the application
