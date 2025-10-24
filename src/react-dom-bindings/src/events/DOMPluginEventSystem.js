@@ -1,3 +1,26 @@
+/**
+ * DOM Plugin Event System - React's Event Delegation Implementation
+ *
+ * This module implements React's synthetic event system with event delegation.
+ * Instead of attaching event listeners to individual DOM elements, React uses
+ * a single event delegation system at the root container level.
+ *
+ * Key features:
+ * - Event delegation at root container level
+ * - Cross-browser event normalization
+ * - Synthetic event creation and dispatch
+ * - Support for both capture and bubble phases
+ * - Priority-based event handling
+ *
+ * Benefits:
+ * - Better performance (fewer event listeners)
+ * - Consistent behavior across browsers
+ * - Dynamic event handling for added/removed elements
+ * - Memory efficiency
+ *
+ * @module DOMPluginEventSystem
+ */
+
 import { allNativeEvents } from "./EventRegistry";
 import * as SimpleEventPlugin from "./plugins/SimpleEventPlugin";
 import { IS_CAPTURE_PHASE } from "./EventSystemFlags";
@@ -9,32 +32,57 @@ import {
 import getEventTarget from "./getEventTarget";
 import { HostComponent } from "react-reconciler/src/ReactWorkTags";
 import getListener from "./getListener";
+
+// Register all simple events (click, change, etc.)
 SimpleEventPlugin.registerEvents();
+
+// Unique marker to track if container already has listeners
 const listeningMarker = `_reactListening` + Math.random().toString(36).slice(2);
+/**
+ * Listen to All Supported Events
+ *
+ * Sets up event delegation for all supported events on the root container.
+ * This function is called once per root container and registers listeners
+ * for both capture and bubble phases of all native events.
+ *
+ * The event delegation approach means that instead of attaching listeners
+ * to individual elements, we attach them to the root and handle all events
+ * from there, determining the actual target through event bubbling/capturing.
+ *
+ * @param {Element} rootContainerElement - Root DOM element (e.g., div#root)
+ */
 export function listenToAllSupportedEvents(rootContainerElement) {
-  debugger;
-  //监听根容器，也就是div#root只监听一次
+  // Only set up listeners once per container
   if (!rootContainerElement[listeningMarker]) {
     rootContainerElement[listeningMarker] = true;
-    // 遍历所有的原生的事件比如click,进行监听
+
+    // Register listeners for all native events (click, change, focus, etc.)
     allNativeEvents.forEach((domEventName) => {
+      // Register for capture phase (events flow down from root to target)
       listenToNativeEvent(domEventName, true, rootContainerElement);
+      // Register for bubble phase (events flow up from target to root)
       listenToNativeEvent(domEventName, false, rootContainerElement);
     });
   }
 }
 /**
- * 注册原生事件
- * @param {*} domEventName 原生事件 click
- * @param {*} isCapturePhaseListener 是否是捕获阶段 true false
- * @param {*} target 目标DOM节点 div#root 容器节点
+ * Listen to Native Event
+ *
+ * Registers a native event listener on the target DOM element for a specific
+ * event type and phase (capture or bubble). This creates the actual DOM event
+ * listener that will handle all events of this type.
+ *
+ * @param {string} domEventName - Native event name (e.g., 'click', 'change')
+ * @param {boolean} isCapturePhaseListener - Whether this is for capture phase
+ * @param {Element} target - Target DOM element (root container)
  */
 export function listenToNativeEvent(
   domEventName,
   isCapturePhaseListener,
   target
 ) {
-  let eventSystemFlags = 0; //默认是0指的是冒泡  4是捕获
+  // Set event system flags: 0 for bubble phase, IS_CAPTURE_PHASE for capture
+  let eventSystemFlags = 0;
   if (isCapturePhaseListener) {
     eventSystemFlags |= IS_CAPTURE_PHASE;
   }

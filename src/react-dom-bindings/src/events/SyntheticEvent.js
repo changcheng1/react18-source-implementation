@@ -1,64 +1,131 @@
+/**
+ * Synthetic Event - Cross-Browser Event Wrapper
+ *
+ * This module implements React's synthetic event system, which provides a
+ * consistent interface for handling events across different browsers.
+ * Synthetic events wrap native browser events and normalize their behavior.
+ *
+ * Key features:
+ * - Cross-browser compatibility
+ * - Consistent API across different event types
+ * - Event pooling for performance (in older React versions)
+ * - preventDefault and stopPropagation support
+ * - Integration with React's event delegation system
+ *
+ * @module SyntheticEvent
+ */
+
 import assign from "shared/assign";
 
+/**
+ * Helper functions for event state tracking
+ */
 function functionThatReturnsTrue() {
   return true;
 }
+
 function functionThatReturnsFalse() {
   return false;
 }
-const MouseEventInterface = {
-  clientX: 0,
-  clientY: 0
-}
 
+/**
+ * Mouse Event Interface
+ *
+ * Defines the properties that should be copied from native mouse events
+ * to synthetic mouse events. This ensures consistent access to mouse
+ * position and button information.
+ */
+const MouseEventInterface = {
+  clientX: 0, // X coordinate relative to viewport
+  clientY: 0, // Y coordinate relative to viewport
+};
+
+/**
+ * Create Synthetic Event
+ *
+ * Factory function that creates synthetic event constructors with specific interfaces.
+ * This allows different event types (mouse, keyboard, etc.) to have their own
+ * property sets while sharing common synthetic event behavior.
+ *
+ * @param {Object} inter - Interface object defining which properties to copy from native events
+ * @returns {Function} Synthetic event constructor
+ */
 function createSyntheticEvent(inter) {
   /**
-   *合成事件的基类
-   * @param {*} reactName React属性名 onClick
-   * @param {*} reactEventType click
-   * @param {*} targetInst 事件源对应的fiber实例
-   * @param {*} nativeEvent 原生事件对象
-   * @param {*} nativeEventTarget 原生事件源 span 事件源对应的那个真实DOM
+   * Synthetic Base Event Constructor
+   *
+   * Creates a synthetic event that wraps a native browser event with consistent
+   * cross-browser behavior and React-specific functionality.
+   *
+   * @param {string} reactName - React event prop name (e.g., 'onClick')
+   * @param {string} reactEventType - Event type (e.g., 'click')
+   * @param {Fiber} targetInst - Fiber instance of the event target
+   * @param {Event} nativeEvent - Original native browser event
+   * @param {Element} nativeEventTarget - DOM element that triggered the event
    */
   function SyntheticBaseEvent(
-    reactName, reactEventType, targetInst, nativeEvent, nativeEventTarget) {
-    this._reactName = reactName;
-    this.type = reactEventType;
-    this._targetInst = targetInst;
-    this.nativeEvent = nativeEvent;
-    this.target = nativeEventTarget;
-    //把此接口上对应的属性从原生事件上拷贝到合成事件实例上
+    reactName,
+    reactEventType,
+    targetInst,
+    nativeEvent,
+    nativeEventTarget
+  ) {
+    // React-specific properties
+    this._reactName = reactName; // React prop name (onClick, onChange, etc.)
+    this.type = reactEventType; // Event type (click, change, etc.)
+    this._targetInst = targetInst; // Target fiber instance
+    this.nativeEvent = nativeEvent; // Original native event
+    this.target = nativeEventTarget; // DOM element that triggered event
+
+    // Copy interface-specific properties from native event
     for (const propName in inter) {
       if (!inter.hasOwnProperty(propName)) {
         continue;
       }
-      this[propName] = nativeEvent[propName]
+      this[propName] = nativeEvent[propName];
     }
-    //是否已经阻止默认事件
-    this.isDefaultPrevented = functionThatReturnsFalse;
-    //是否已经阻止继续传播
-    this.isPropagationStopped = functionThatReturnsFalse;
+
+    // Initialize event state tracking
+    this.isDefaultPrevented = functionThatReturnsFalse; // Default behavior not prevented
+    this.isPropagationStopped = functionThatReturnsFalse; // Propagation not stopped
+
     return this;
   }
+  // Add synthetic event methods to prototype
   assign(SyntheticBaseEvent.prototype, {
+    /**
+     * Prevent Default
+     *
+     * Prevents the default browser behavior for this event.
+     * Uses cross-browser compatible approach for older browsers.
+     */
     preventDefault() {
       const event = this.nativeEvent;
       if (event.preventDefault) {
         event.preventDefault();
       } else {
+        // Fallback for older browsers (IE8 and below)
         event.returnValue = false;
       }
       this.isDefaultPrevented = functionThatReturnsTrue;
     },
+
+    /**
+     * Stop Propagation
+     *
+     * Stops the event from bubbling up or capturing down the DOM tree.
+     * Uses cross-browser compatible approach for older browsers.
+     */
     stopPropagation() {
       const event = this.nativeEvent;
       if (event.stopPropagation) {
         event.stopPropagation();
       } else {
+        // Fallback for older browsers (IE8 and below)
         event.cancelBubble = true;
       }
       this.isPropagationStopped = functionThatReturnsTrue;
-    }
+    },
   });
   return SyntheticBaseEvent;
 }

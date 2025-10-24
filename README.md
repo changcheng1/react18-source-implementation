@@ -40,9 +40,6 @@ npm install
 # Start development
 npm run dev
 
-# Run examples
-npm run example:hooks
-npm run example:concurrent
 ```
 
 ### Project Structure Overview

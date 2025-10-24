@@ -9,21 +9,21 @@ export function createContainer(containerInfo) {
   return createFiberRoot(containerInfo);
 }
 /**
- * 更新容器，把虚拟dom element变成真实DOM插入到container容器中
- * @param {*} element 虚拟DOM
- * @param {*} container DOM容器 FiberRootNode containerInfo div#root
+ * Update container, convert virtual DOM element to real DOM and insert into container
+ * @param {*} element Virtual DOM
+ * @param {*} container DOM container FiberRootNode containerInfo div#root
  */
 export function updateContainer(element, container) {
-  //获取当前的根fiber
+  // Get the current root fiber
   const current = container.current;
   const eventTime = requestEventTime();
-  //请求一个更新车道 16
+  // Request an update lane 16
   const lane = requestUpdateLane(current);
-  //创建更新
+  // Create update
   const update = createUpdate(lane);
-  //要更新的虚拟DOM
+  // Virtual DOM to be updated
   update.payload = { element }; //h1
-  //把此更新对象添加到current这个根Fiber的更新队列上,返回根节点
+  // Add this update object to the update queue of the current root Fiber, return the root node
   const root = enqueueUpdate(current, update, lane);
   scheduleUpdateOnFiber(root, current, lane, eventTime);
 }
