@@ -10,6 +10,7 @@
 | [🏗️ Architecture Overview](#️-architecture-overview) | High-level system design           | Module structure, Design patterns     |
 | [⚡ Core Implementation](#-core-implementation)      | Detailed implementation flows      | Startup, Rendering, Reconciliation    |
 | [🎣 Hooks System](#-hooks-system)                    | Complete hooks implementation      | useState, useEffect, useReducer       |
+| [🔄 DOM Diff Algorithm](#-dom-diff-algorithm)        | Reconciliation and diff process    | Element comparison, List reconciliation |
 | [🔄 Concurrent Features](#-concurrent-features)      | React 18 concurrent capabilities   | Suspense, Transitions, Priority       |
 | [🎯 Event System](#-event-system)                    | Synthetic event implementation     | Delegation, Dispatch, Handlers        |
 | [⏰ Scheduler](#-scheduler)                          | Task scheduling and prioritization | Time slicing, Priority queues         |
@@ -120,25 +121,826 @@ const root = createRoot(document.getElementById("root"));
 root.render(<App />);
 ```
 
-#### 1.2 Startup Execution Flow
+#### 1.2 Complete Application Execution Flow
+
+The React application execution involves multiple interconnected phases, each with specific responsibilities and detailed internal processes.
+
+##### 1.2.1 Phase 1: Module Initialization & Setup
 
 ```mermaid
 sequenceDiagram
+    participant Browser as Browser
     participant Main as main.jsx
     participant React as React Package
     participant ReactDOM as ReactDOM Package
+    participant Shared as Shared Utils
     participant Reconciler as Reconciler
     participant Scheduler as Scheduler
 
-    Main->>React: import React
-    React->>React: Initialize Dispatcher
-    Main->>ReactDOM: createRoot(container)
-    ReactDOM->>Reconciler: createContainer()
-    Reconciler->>Reconciler: createFiberRoot()
-    ReactDOM->>ReactDOM: setupEventListeners()
-    Main->>ReactDOM: root.render(<App />)
-    ReactDOM->>Reconciler: updateContainer()
-    Reconciler->>Scheduler: scheduleUpdateOnFiber()
+    Browser->>Main: Load Application
+    Main->>React: import * as React
+    React->>Shared: Load ReactSymbols
+    React->>Shared: Load ReactFeatureFlags
+    React->>React: Initialize ReactCurrentDispatcher
+    React->>React: Initialize ReactCurrentBatchConfig
+    React->>React: Setup Hook Dispatchers
+    
+    Main->>ReactDOM: import { createRoot }
+    ReactDOM->>Reconciler: Load Reconciler APIs
+    ReactDOM->>Scheduler: Load Scheduler APIs
+    ReactDOM->>ReactDOM: Register Event Plugins
+    ReactDOM->>ReactDOM: Initialize DOM Bindings
+```
+
+**Detailed Module Loading Process:**
+
+```javascript
+// Phase 1.1: React Core Initialization
+function initializeReactCore() {
+  // Step 1: Initialize global dispatchers
+  ReactCurrentDispatcher.current = null;
+  ReactCurrentBatchConfig.transition = null;
+  
+  // Step 2: Setup development tools integration
+  if (__DEV__) {
+    ReactDebugCurrentFrame.setExtraStackFrame = null;
+  }
+  
+  // Step 3: Initialize shared internals
+  const ReactSharedInternals = {
+    ReactCurrentDispatcher,
+    ReactCurrentBatchConfig,
+    ReactCurrentOwner,
+    ReactDebugCurrentFrame,
+  };
+  
+  return ReactSharedInternals;
+}
+
+// Phase 1.2: Event System Initialization
+function initializeEventSystem() {
+  // Register all supported events
+  registerSimpleEvents();
+  registerTwoPhaseEvent('onBeforeInput', ['beforeinput', 'compositionend']);
+  registerTwoPhaseEvent('onCompositionEnd', ['compositionend']);
+  registerTwoPhaseEvent('onCompositionStart', ['compositionstart']);
+  registerTwoPhaseEvent('onCompositionUpdate', ['compositionupdate']);
+  
+  // Initialize event priorities
+  setCurrentUpdatePriority(DefaultEventPriority);
+}
+```
+
+##### 1.2.2 Phase 2: Root Creation & Container Setup
+
+```mermaid
+flowchart TD
+    A[createRoot called] --> B[Validate Container]
+    B --> C[Create FiberRoot]
+    C --> D[Create HostRoot Fiber]
+    D --> E[Initialize Update Queue]
+    E --> F[Setup Event Delegation]
+    F --> G[Create ReactDOMRoot Instance]
+    G --> H[Mark Container as Root]
+    
+    subgraph "FiberRoot Creation Details"
+        C1[Allocate FiberRootNode]
+        C2[Set containerInfo]
+        C3[Initialize pendingLanes]
+        C4[Setup callback queues]
+        C5[Initialize ping cache]
+    end
+    
+    C --> C1 --> C2 --> C3 --> C4 --> C5
+    
+    style A fill:#61dafb
+    style G fill:#4ecdc4
+```
+
+**Detailed Root Creation Implementation:**
+
+```javascript
+// Phase 2.1: Container Validation and Preparation
+export function createRoot(container, options) {
+  // Step 1: Validate container element
+  if (!isValidContainer(container)) {
+    throw new Error('createRoot(...): Target container is not a DOM element.');
+  }
+  
+  // Step 2: Process options
+  const {
+    identifierPrefix,
+    onRecoverableError,
+    transitionCallbacks,
+  } = options || {};
+  
+  // Step 3: Create internal root structure
+  const root = createContainer(
+    container,
+    ConcurrentRoot,
+    null,
+    isStrictMode,
+    concurrentUpdatesByDefaultOverride,
+    identifierPrefix,
+    onRecoverableError,
+    transitionCallbacks
+  );
+  
+  // Step 4: Mark container for React
+  markContainerAsRoot(root.current, container);
+  
+  // Step 5: Setup event delegation system
+  const rootContainerElement = container.nodeType === COMMENT_NODE 
+    ? container.parentNode 
+    : container;
+  listenToAllSupportedEvents(rootContainerElement);
+  
+  // Step 6: Return ReactDOMRoot instance
+  return new ReactDOMRoot(root);
+}
+
+// Phase 2.2: Fiber Root Structure Creation
+function createFiberRoot(containerInfo, tag, hydrate, initialChildren, hydrationCallbacks) {
+  // Step 1: Create root node
+  const root = new FiberRootNode(containerInfo, tag, hydrate, hydrationCallbacks);
+  
+  // Step 2: Create host root fiber
+  const uninitializedFiber = createHostRootFiber(tag, isStrictMode);
+  root.current = uninitializedFiber;
+  uninitializedFiber.stateNode = root;
+  
+  // Step 3: Initialize update queue
+  const initialState = {
+    element: initialChildren,
+    isDehydrated: hydrate,
+    cache: null,
+    transitions: null,
+    pendingSuspenseBoundaries: null,
+  };
+  uninitializedFiber.memoizedState = initialState;
+  
+  const updateQueue = createUpdateQueue();
+  uninitializedFiber.updateQueue = updateQueue;
+  
+  return root;
+}
+```
+
+##### 1.2.3 Phase 3: Initial Render Process
+
+```mermaid
+sequenceDiagram
+    participant App as Application Code
+    participant Root as ReactDOMRoot
+    participant Reconciler as Reconciler
+    participant Scheduler as Scheduler
+    participant WorkLoop as Work Loop
+    participant Fiber as Fiber Tree
+    participant DOM as DOM
+
+    App->>Root: root.render(<App />)
+    Root->>Root: Clear container innerHTML
+    Root->>Reconciler: updateContainer(element, root)
+    
+    Reconciler->>Reconciler: Create Update Object
+    Reconciler->>Reconciler: Enqueue Update
+    Reconciler->>Reconciler: scheduleUpdateOnFiber()
+    
+    Reconciler->>Scheduler: ensureRootIsScheduled()
+    Scheduler->>Scheduler: Calculate Priority
+    Scheduler->>Scheduler: scheduleCallback()
+    
+    Scheduler->>WorkLoop: performConcurrentWorkOnRoot()
+    WorkLoop->>WorkLoop: prepareFreshStack()
+    WorkLoop->>WorkLoop: renderRootConcurrent()
+    
+    loop Work Loop Iteration
+        WorkLoop->>Fiber: performUnitOfWork()
+        Fiber->>Fiber: beginWork()
+        Fiber->>Fiber: completeWork()
+        WorkLoop->>Scheduler: shouldYield()?
+    end
+    
+    WorkLoop->>Reconciler: finishConcurrentRender()
+    Reconciler->>Reconciler: commitRoot()
+    Reconciler->>DOM: Apply DOM Changes
+```
+
+**Detailed Render Process Implementation:**
+
+```javascript
+// Phase 3.1: Update Container Process
+function updateContainer(element, container, parentComponent, callback) {
+  const current = container.current;
+  const eventTime = requestEventTime();
+  const lane = requestUpdateLane(current);
+
+  // Step 1: Create update object
+  const update = createUpdate(eventTime, lane);
+  update.payload = { element };
+  
+  if (callback !== undefined && callback !== null) {
+    update.callback = callback;
+  }
+
+  // Step 2: Enqueue the update
+  const root = enqueueUpdate(current, update, lane);
+  
+  if (root !== null) {
+    // Step 3: Schedule the update
+    scheduleUpdateOnFiber(root, current, lane, eventTime);
+    entangleTransitions(root, current, lane);
+  }
+
+  return lane;
+}
+
+// Phase 3.2: Work Loop Execution
+function workLoopConcurrent() {
+  // Work until scheduler tells us to yield
+  while (workInProgress !== null && !shouldYield()) {
+    performUnitOfWork(workInProgress);
+  }
+}
+
+function performUnitOfWork(unitOfWork) {
+  const current = unitOfWork.alternate;
+  
+  // Step 1: Begin work phase
+  setCurrentDebugFiberInDEV(unitOfWork);
+  let next;
+  
+  if (enableProfilerTimer && (unitOfWork.mode & ProfileMode) !== NoMode) {
+    startProfilerTimer(unitOfWork);
+    next = beginWork(current, unitOfWork, renderLanes);
+    stopProfilerTimerIfRunningAndRecordDelta(unitOfWork, true);
+  } else {
+    next = beginWork(current, unitOfWork, renderLanes);
+  }
+  
+  resetCurrentDebugFiberInDEV();
+  unitOfWork.memoizedProps = unitOfWork.pendingProps;
+  
+  if (next === null) {
+    // Step 2: Complete work phase
+    completeUnitOfWork(unitOfWork);
+  } else {
+    // Step 3: Continue with child
+    workInProgress = next;
+  }
+  
+  ReactCurrentOwner.current = null;
+}
+```
+
+##### 1.2.4 Phase 4: Component Lifecycle & Hook Execution
+
+```mermaid
+flowchart TD
+    A[Component Render] --> B{Component Type?}
+    
+    B -->|Function Component| C[Setup Hook Context]
+    B -->|Class Component| D[Call Lifecycle Methods]
+    
+    C --> E[renderWithHooks]
+    E --> F[Set Current Dispatcher]
+    F --> G[Execute Component Function]
+    G --> H[Process Hook Calls]
+    
+    H --> I{Hook Type?}
+    I -->|useState| J[Mount/Update State]
+    I -->|useEffect| K[Schedule Effect]
+    I -->|useCallback| L[Memoize Callback]
+    I -->|useMemo| M[Memoize Value]
+    
+    J --> N[Return JSX]
+    K --> N
+    L --> N
+    M --> N
+    
+    D --> O[componentDidMount/Update]
+    O --> N
+    
+    N --> P[Reconcile Children]
+    P --> Q[Continue Fiber Tree]
+    
+    style C fill:#61dafb
+    style H fill:#4ecdc4
+```
+
+**Hook Execution Flow Details:**
+
+```javascript
+// Phase 4.1: Hook Context Setup
+export function renderWithHooks(current, workInProgress, Component, props, secondArg, nextRenderLanes) {
+  renderLanes = nextRenderLanes;
+  currentlyRenderingFiber = workInProgress;
+
+  // Step 1: Clear previous hook state
+  workInProgress.memoizedState = null;
+  workInProgress.updateQueue = null;
+  workInProgress.lanes = NoLanes;
+
+  // Step 2: Set appropriate dispatcher
+  ReactCurrentDispatcher.current =
+    current === null || current.memoizedState === null
+      ? HooksDispatcherOnMount
+      : HooksDispatcherOnUpdate;
+
+  // Step 3: Execute component function
+  let children = Component(props, secondArg);
+
+  // Step 4: Handle re-renders during render phase
+  if (didScheduleRenderPhaseUpdateDuringThisPass) {
+    let numberOfReRenders = 0;
+    do {
+      didScheduleRenderPhaseUpdateDuringThisPass = false;
+      localIdCounter = 0;
+
+      if (numberOfReRenders >= RE_RENDER_LIMIT) {
+        throw new Error('Too many re-renders...');
+      }
+
+      numberOfReRenders += 1;
+      currentHook = null;
+      workInProgressHook = null;
+
+      workInProgress.updateQueue = null;
+
+      ReactCurrentDispatcher.current = HooksDispatcherOnRerender;
+      children = Component(props, secondArg);
+    } while (didScheduleRenderPhaseUpdateDuringThisPass);
+  }
+
+  // Step 5: Cleanup
+  ReactCurrentDispatcher.current = ContextOnlyDispatcher;
+  currentlyRenderingFiber = null;
+  currentHook = null;
+  workInProgressHook = null;
+  renderLanes = NoLanes;
+
+  return children;
+}
+```
+
+##### 1.2.5 Phase 5: Commit Phase Execution
+
+```mermaid
+sequenceDiagram
+    participant Reconciler as Reconciler
+    participant BeforeMutation as Before Mutation
+    participant Mutation as Mutation Phase
+    participant Layout as Layout Phase
+    participant Passive as Passive Effects
+    participant DOM as DOM
+    participant Browser as Browser
+
+    Reconciler->>Reconciler: commitRootImpl()
+    
+    Note over Reconciler: Phase 1: Before Mutation
+    Reconciler->>BeforeMutation: commitBeforeMutationEffects()
+    BeforeMutation->>BeforeMutation: Process getSnapshotBeforeUpdate
+    BeforeMutation->>BeforeMutation: Schedule useEffect cleanup
+    
+    Note over Reconciler: Phase 2: Mutation
+    Reconciler->>Mutation: commitMutationEffects()
+    Mutation->>DOM: Insert/Update/Delete DOM nodes
+    Mutation->>DOM: Update DOM properties
+    Mutation->>DOM: Update refs
+    
+    Reconciler->>Reconciler: Switch fiber trees (root.current = finishedWork)
+    
+    Note over Reconciler: Phase 3: Layout
+    Reconciler->>Layout: commitLayoutEffects()
+    Layout->>Layout: Call componentDidMount/Update
+    Layout->>Layout: Call useLayoutEffect
+    Layout->>Layout: Update refs
+    
+    Note over Reconciler: Phase 4: Passive Effects
+    Reconciler->>Passive: Schedule passive effects
+    Passive->>Passive: Call useEffect callbacks
+    Passive->>Passive: Call useEffect cleanup
+    
+    Layout->>Browser: Trigger browser paint
+```
+
+**Detailed Commit Implementation:**
+
+```javascript
+// Phase 5.1: Complete Commit Process
+function commitRootImpl(root, renderPriorityLevel) {
+  // Step 1: Prepare for commit
+  const finishedWork = root.finishedWork;
+  const lanes = root.finishedLanes;
+  
+  if (finishedWork === null) {
+    return null;
+  }
+  
+  root.finishedWork = null;
+  root.finishedLanes = NoLanes;
+  
+  // Step 2: Before mutation phase
+  const shouldFireAfterActiveInstanceBlur = commitBeforeMutationEffects(root, finishedWork);
+  
+  // Step 3: Mutation phase
+  commitMutationEffects(root, finishedWork, lanes);
+  
+  // Step 4: Switch the fiber tree
+  root.current = finishedWork;
+  
+  // Step 5: Layout phase
+  commitLayoutEffects(finishedWork, root, lanes);
+  
+  // Step 6: Schedule passive effects
+  if (
+    (finishedWork.subtreeFlags & PassiveMask) !== NoFlags ||
+    (finishedWork.flags & PassiveMask) !== NoFlags
+  ) {
+    if (!rootDoesHavePassiveEffects) {
+      rootDoesHavePassiveEffects = true;
+      pendingPassiveEffectsRemainingLanes = remainingLanes;
+      scheduleCallback(NormalSchedulerPriority, () => {
+        flushPassiveEffects();
+        return null;
+      });
+    }
+  }
+  
+  // Step 7: Cleanup and prepare for next render
+  remainingLanes = mergeLanes(remainingLanes, getRemainingLanes(root, lanes));
+  ensureRootIsScheduled(root, now());
+  
+  return null;
+}
+```
+
+##### 1.2.6 Phase 6: Event Handling & State Updates
+
+```mermaid
+sequenceDiagram
+    participant User as User Interaction
+    participant DOM as DOM Element
+    participant EventSystem as Event System
+    participant Reconciler as Reconciler
+    participant Scheduler as Scheduler
+    participant Component as Component
+    participant Hooks as Hook System
+
+    User->>DOM: Click/Input/etc
+    DOM->>EventSystem: Native Event Captured
+    EventSystem->>EventSystem: Create Synthetic Event
+    EventSystem->>EventSystem: Find Target Fiber
+    EventSystem->>EventSystem: Collect Event Listeners
+    EventSystem->>EventSystem: Dispatch Event
+    
+    EventSystem->>Component: Call Event Handler
+    Component->>Hooks: setState/dispatch called
+    Hooks->>Hooks: Create Update Object
+    Hooks->>Reconciler: Schedule Update
+    
+    Reconciler->>Scheduler: ensureRootIsScheduled()
+    Scheduler->>Scheduler: Determine Priority
+    Scheduler->>Reconciler: Schedule Render
+    
+    Note over Reconciler: Trigger Re-render Cycle
+    Reconciler->>Reconciler: Start Work Loop
+    Reconciler->>Component: Re-render Component
+    Component->>DOM: Apply Changes
+```
+
+**Detailed Event Handling Process:**
+
+```javascript
+// Phase 6.1: Event Capture and Processing
+function dispatchEventForPlugins(domEventName, eventSystemFlags, nativeEvent, targetInst, targetContainer) {
+  const nativeEventTarget = getEventTarget(nativeEvent);
+  const dispatchQueue = [];
+
+  // Step 1: Extract events from fiber tree
+  extractEvents(
+    dispatchQueue,
+    domEventName,
+    targetInst,
+    nativeEvent,
+    nativeEventTarget,
+    eventSystemFlags,
+    targetContainer,
+  );
+
+  // Step 2: Process dispatch queue
+  processDispatchQueue(dispatchQueue, eventSystemFlags);
+}
+
+// Phase 6.2: State Update Scheduling
+function dispatchSetState(fiber, queue, action) {
+  const lane = requestUpdateLane(fiber);
+  const eventTime = requestEventTime();
+
+  // Step 1: Create update object
+  const update = {
+    lane,
+    action,
+    hasEagerState: false,
+    eagerState: null,
+    next: null,
+  };
+
+  // Step 2: Eager state calculation optimization
+  if (fiber.lanes === NoLanes && (fiber.alternate === null || fiber.alternate.lanes === NoLanes)) {
+    const lastRenderedReducer = queue.lastRenderedReducer;
+    if (lastRenderedReducer !== null) {
+      try {
+        const currentState = queue.lastRenderedState;
+        const eagerState = lastRenderedReducer(currentState, action);
+        update.hasEagerState = true;
+        update.eagerState = eagerState;
+        
+        if (Object.is(eagerState, currentState)) {
+          // Bail out - no change needed
+          return;
+        }
+      } catch (error) {
+        // Suppress errors, will be caught during render
+      }
+    }
+  }
+
+  // Step 3: Enqueue update and schedule work
+  const root = enqueueConcurrentHookUpdate(fiber, queue, update, lane);
+  if (root !== null) {
+    scheduleUpdateOnFiber(root, fiber, lane, eventTime);
+    entangleTransitionUpdate(root, queue, lane);
+  }
+}
+```
+
+##### 1.2.7 Phase 7: Concurrent Features & Priority Management
+
+```mermaid
+flowchart TD
+    A[Update Triggered] --> B{Update Priority?}
+    
+    B -->|Sync| C[Immediate Execution]
+    B -->|User Blocking| D[High Priority Queue]
+    B -->|Normal| E[Normal Priority Queue]
+    B -->|Low| F[Low Priority Queue]
+    B -->|Idle| G[Idle Priority Queue]
+    
+    C --> H[Synchronous Render]
+    D --> I[Concurrent Render with High Priority]
+    E --> J[Concurrent Render with Normal Priority]
+    F --> K[Concurrent Render with Low Priority]
+    G --> L[Idle Render]
+    
+    I --> M{Should Yield?}
+    J --> M
+    K --> M
+    L --> M
+    
+    M -->|No| N[Continue Work]
+    M -->|Yes| O[Yield to Browser]
+    
+    N --> P[Complete Render]
+    O --> Q[Resume Later]
+    Q --> M
+    
+    H --> R[Commit Changes]
+    P --> R
+    
+    style B fill:#61dafb
+    style M fill:#ff6b6b
+    style R fill:#4ecdc4
+```
+
+**Priority Management Implementation:**
+
+```javascript
+// Phase 7.1: Priority Calculation
+export function requestUpdateLane(fiber) {
+  const mode = fiber.mode;
+  if ((mode & ConcurrentMode) === NoMode) {
+    return SyncLane;
+  }
+
+  // Check for transition context
+  const isTransition = requestCurrentTransition() !== NoTransition;
+  if (isTransition) {
+    if (currentEventTransitionLane === NoLane) {
+      currentEventTransitionLane = claimNextTransitionLane();
+    }
+    return currentEventTransitionLane;
+  }
+
+  // Get priority from current update priority
+  const updatePriority = getCurrentUpdatePriority();
+  if (updatePriority !== NoEventPriority) {
+    return lanePriorityToLanes(updatePriority);
+  }
+
+  // Get priority from scheduler
+  const schedulerPriority = getCurrentSchedulerPriorityLevel();
+  const lane = schedulerPriorityToLane(schedulerPriority);
+  return lane;
+}
+
+// Phase 7.2: Concurrent Work Scheduling
+function ensureRootIsScheduled(root, currentTime) {
+  const existingCallbackNode = root.callbackNode;
+
+  // Step 1: Mark starved lanes as expired
+  markStarvedLanesAsExpired(root, currentTime);
+
+  // Step 2: Determine next lanes to work on
+  const nextLanes = getNextLanes(root, root === workInProgressRoot ? workInProgressRootRenderLanes : NoLanes);
+
+  if (nextLanes === NoLanes) {
+    // No work to do
+    if (existingCallbackNode !== null) {
+      cancelCallback(existingCallbackNode);
+    }
+    root.callbackNode = null;
+    root.callbackPriority = NoLane;
+    return;
+  }
+
+  // Step 3: Check if we can reuse existing callback
+  const newCallbackPriority = getHighestPriorityLane(nextLanes);
+  const existingCallbackPriority = root.callbackPriority;
+
+  if (existingCallbackPriority === newCallbackPriority && existingCallbackNode !== null) {
+    return; // Reuse existing callback
+  }
+
+  // Step 4: Cancel existing callback and schedule new one
+  if (existingCallbackNode != null) {
+    cancelCallback(existingCallbackNode);
+  }
+
+  let newCallbackNode;
+  if (newCallbackPriority === SyncLane) {
+    // Synchronous work
+    if (root.tag === LegacyRoot) {
+      scheduleLegacySyncCallback(performSyncWorkOnRoot.bind(null, root));
+    } else {
+      scheduleSyncCallback(performSyncWorkOnRoot.bind(null, root));
+    }
+    newCallbackNode = null;
+  } else {
+    // Concurrent work
+    let schedulerPriorityLevel;
+    switch (lanesToEventPriority(nextLanes)) {
+      case DiscreteEventPriority:
+        schedulerPriorityLevel = ImmediateSchedulerPriority;
+        break;
+      case ContinuousEventPriority:
+        schedulerPriorityLevel = UserBlockingSchedulerPriority;
+        break;
+      case DefaultEventPriority:
+        schedulerPriorityLevel = NormalSchedulerPriority;
+        break;
+      case IdleEventPriority:
+        schedulerPriorityLevel = IdleSchedulerPriority;
+        break;
+      default:
+        schedulerPriorityLevel = NormalSchedulerPriority;
+        break;
+    }
+
+    newCallbackNode = scheduleCallback(
+      schedulerPriorityLevel,
+      performConcurrentWorkOnRoot.bind(null, root),
+    );
+  }
+
+  root.callbackPriority = newCallbackPriority;
+  root.callbackNode = newCallbackNode;
+}
+```
+
+##### 1.2.8 Phase 8: Error Handling & Recovery
+
+```mermaid
+flowchart TD
+    A[Error Occurs] --> B{Error Type?}
+    
+    B -->|JavaScript Error| C[Component Error]
+    B -->|Promise Rejection| D[Async Error]
+    B -->|Render Error| E[Render Phase Error]
+    
+    C --> F[Find Error Boundary]
+    D --> G[Find Suspense Boundary]
+    E --> H[Unwind Work Stack]
+    
+    F --> I{Error Boundary Found?}
+    G --> J{Suspense Boundary Found?}
+    H --> K[Mark Fiber as Incomplete]
+    
+    I -->|Yes| L[Capture Error]
+    I -->|No| M[Propagate to Root]
+    
+    J -->|Yes| N[Suspend Component]
+    J -->|No| O[Throw to Parent]
+    
+    K --> P[Continue Unwinding]
+    
+    L --> Q[Call getDerivedStateFromError]
+    M --> R[Global Error Handler]
+    N --> S[Show Fallback UI]
+    O --> F
+    P --> T{More Work?}
+    
+    Q --> U[Schedule Re-render]
+    S --> V[Wait for Promise]
+    T -->|Yes| P
+    T -->|No| W[Complete Error Handling]
+    
+    U --> X[Render Error UI]
+    V --> Y[Resume Render]
+    
+    style B fill:#ff6b6b
+    style L fill:#4ecdc4
+    style N fill:#45b7d1
+```
+
+**Error Handling Implementation:**
+
+```javascript
+// Phase 8.1: Error Capture and Processing
+function throwException(root, returnFiber, sourceFiber, value, rootRenderLanes) {
+  // Mark source fiber as incomplete
+  sourceFiber.flags |= Incomplete;
+
+  if (value !== null && typeof value === 'object' && typeof value.then === 'function') {
+    // This is a thenable (Promise)
+    const wakeable = value;
+    
+    // Find nearest Suspense boundary
+    let workInProgress = returnFiber;
+    do {
+      if (workInProgress.tag === SuspenseComponent && shouldCaptureSuspense(workInProgress)) {
+        // Attach wakeable to suspense boundary
+        const wakeables = workInProgress.updateQueue;
+        if (wakeables === null) {
+          const updateQueue = new Set();
+          updateQueue.add(wakeable);
+          workInProgress.updateQueue = updateQueue;
+        } else {
+          wakeables.add(wakeable);
+        }
+
+        // Attach ping listener
+        attachPingListener(root, wakeable, rootRenderLanes);
+        
+        workInProgress.flags |= ShouldCapture;
+        workInProgress.lanes = rootRenderLanes;
+        return;
+      }
+      workInProgress = workInProgress.return;
+    } while (workInProgress !== null);
+    
+    // No Suspense boundary found, treat as error
+    value = new Error('A component suspended while responding to synchronous input.');
+  }
+
+  // Handle regular errors
+  let workInProgress = returnFiber;
+  do {
+    switch (workInProgress.tag) {
+      case HostRoot: {
+        const errorInfo = value;
+        workInProgress.flags |= ShouldCapture;
+        const lane = pickArbitraryLane(rootRenderLanes);
+        workInProgress.lanes = mergeLanes(workInProgress.lanes, lane);
+        
+        const update = createRootErrorUpdate(workInProgress, errorInfo, lane);
+        enqueueCapturedUpdate(workInProgress, update);
+        return;
+      }
+      case ClassComponent: {
+        const errorInfo = value;
+        const ctor = workInProgress.type;
+        const instance = workInProgress.stateNode;
+
+        if (
+          (workInProgress.flags & DidCapture) === NoFlags &&
+          (typeof ctor.getDerivedStateFromError === 'function' ||
+            (instance !== null && typeof instance.componentDidCatch === 'function'))
+        ) {
+          workInProgress.flags |= ShouldCapture;
+          const lane = pickArbitraryLane(rootRenderLanes);
+          workInProgress.lanes = mergeLanes(workInProgress.lanes, lane);
+          
+          const update = createClassErrorUpdate(workInProgress, errorInfo, lane);
+          enqueueCapturedUpdate(workInProgress, update);
+          return;
+        }
+        break;
+      }
+    }
+    workInProgress = workInProgress.return;
+  } while (workInProgress !== null);
+}
 ```
 
 #### 1.3 Detailed Implementation Steps
@@ -821,6 +1623,689 @@ function updateMemo(nextCreate, deps) {
   const nextValue = nextCreate();
   hook.memoizedState = [nextValue, nextDeps];
   return nextValue;
+}
+```
+
+---
+
+## 🔄 DOM Diff Algorithm
+
+### 1. DOM Diff Overview
+
+The DOM Diff algorithm is the heart of React's reconciliation process, responsible for efficiently updating the DOM by comparing the current Fiber tree with the new one. React's diff algorithm operates on the principle of minimizing DOM operations while maintaining optimal performance.
+
+#### 1.1 Core Principles
+
+```mermaid
+graph TB
+    A[New Element Tree] --> B[Reconciliation Process]
+    C[Current Fiber Tree] --> B
+    B --> D[DOM Diff Algorithm]
+    D --> E[Minimal DOM Updates]
+    E --> F[Updated DOM]
+    
+    style D fill:#ff6b6b
+    style E fill:#4ecdc4
+```
+
+**Key Assumptions:**
+1. **Same Level Comparison**: Elements are only compared at the same tree level
+2. **Type-Based Optimization**: Different element types result in complete subtree replacement
+3. **Key-Based Identification**: Keys help identify moved elements efficiently
+4. **Heuristic Approach**: Uses heuristics rather than optimal solutions for performance
+
+#### 1.2 Diff Algorithm Phases
+
+```javascript
+// src/react-reconciler/src/ReactChildFiber.js
+
+function reconcileChildFibers(
+  returnFiber,
+  currentFirstChild,
+  newChild,
+  lanes
+) {
+  // Phase 1: Handle different child types
+  if (typeof newChild === 'object' && newChild !== null) {
+    switch (newChild.$$typeof) {
+      case REACT_ELEMENT_TYPE:
+        return placeSingleChild(
+          reconcileSingleElement(returnFiber, currentFirstChild, newChild, lanes)
+        );
+      case REACT_FRAGMENT_TYPE:
+        return reconcileSingleFragment(returnFiber, currentFirstChild, newChild, lanes);
+    }
+
+    // Phase 2: Handle arrays (multiple children)
+    if (Array.isArray(newChild)) {
+      return reconcileChildrenArray(returnFiber, currentFirstChild, newChild, lanes);
+    }
+  }
+
+  // Phase 3: Handle text content
+  if (typeof newChild === 'string' || typeof newChild === 'number') {
+    return placeSingleChild(
+      reconcileSingleTextNode(returnFiber, currentFirstChild, '' + newChild, lanes)
+    );
+  }
+
+  // Phase 4: Delete remaining children
+  return deleteRemainingChildren(returnFiber, currentFirstChild);
+}
+```
+
+### 2. Single Element Reconciliation
+
+#### 2.1 Same Type Element Update
+
+When elements have the same type, React reuses the existing DOM node and updates its properties:
+
+```mermaid
+flowchart TD
+    A[Current: div key='a'] --> B{Same Type?}
+    C[New: div key='a'] --> B
+    B -->|Yes| D[Reuse Fiber Node]
+    D --> E[Update Props]
+    E --> F[Reconcile Children]
+    F --> G[Mark for Update]
+    
+    style D fill:#4ecdc4
+    style E fill:#45b7d1
+```
+
+```javascript
+function reconcileSingleElement(returnFiber, currentFirstChild, element, lanes) {
+  const key = element.key;
+  let child = currentFirstChild;
+
+  // Search for existing child with same key
+  while (child !== null) {
+    if (child.key === key) {
+      const elementType = element.type;
+      
+      if (child.elementType === elementType) {
+        // Same type - reuse existing fiber
+        deleteRemainingChildren(returnFiber, child.sibling);
+        
+        const existing = useFiber(child, element.props);
+        existing.ref = coerceRef(returnFiber, child, element);
+        existing.return = returnFiber;
+        
+        return existing;
+      } else {
+        // Different type - delete all and create new
+        deleteRemainingChildren(returnFiber, child);
+        break;
+      }
+    } else {
+      // Different key - delete this child
+      deleteChild(returnFiber, child);
+    }
+    child = child.sibling;
+  }
+
+  // Create new fiber
+  const created = createFiberFromElement(element, returnFiber.mode, lanes);
+  created.ref = coerceRef(returnFiber, currentFirstChild, element);
+  created.return = returnFiber;
+  return created;
+}
+```
+
+#### 2.2 Different Type Element Replacement
+
+When element types differ, React replaces the entire subtree:
+
+```mermaid
+flowchart TD
+    A[Current: div] --> B{Same Type?}
+    C[New: span] --> B
+    B -->|No| D[Delete Old Subtree]
+    D --> E[Create New Fiber]
+    E --> F[Mount New Subtree]
+    F --> G[Mark for Placement]
+    
+    style D fill:#ff6b6b
+    style E fill:#4ecdc4
+```
+
+### 3. Multiple Children Reconciliation
+
+#### 3.1 Array Reconciliation Algorithm
+
+The most complex part of the diff algorithm handles arrays of children:
+
+```mermaid
+flowchart TD
+    A[Start Array Reconciliation] --> B[Phase 1: Handle Common Prefix]
+    B --> C[Phase 2: Handle Common Suffix]
+    C --> D[Phase 3: Handle Remaining Insertions/Deletions]
+    D --> E[Phase 4: Handle Moves with Key Map]
+    E --> F[Finish Reconciliation]
+    
+    style B fill:#61dafb
+    style C fill:#4ecdc4
+    style D fill:#ff6b6b
+    style E fill:#45b7d1
+```
+
+```javascript
+function reconcileChildrenArray(returnFiber, currentFirstChild, newChildren, lanes) {
+  let resultingFirstChild = null;
+  let previousNewFiber = null;
+  let oldFiber = currentFirstChild;
+  let lastPlacedIndex = 0;
+  let newIdx = 0;
+  let nextOldFiber = null;
+
+  // Phase 1: Handle updates for common prefix
+  for (; oldFiber !== null && newIdx < newChildren.length; newIdx++) {
+    if (oldFiber.index > newIdx) {
+      nextOldFiber = oldFiber;
+      oldFiber = null;
+    } else {
+      nextOldFiber = oldFiber.sibling;
+    }
+
+    const newFiber = updateSlot(returnFiber, oldFiber, newChildren[newIdx], lanes);
+    
+    if (newFiber === null) {
+      if (oldFiber === null) {
+        oldFiber = nextOldFiber;
+      }
+      break; // No match found
+    }
+
+    if (shouldTrackSideEffects) {
+      if (oldFiber && newFiber.alternate === null) {
+        deleteChild(returnFiber, oldFiber);
+      }
+    }
+
+    lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
+    
+    if (previousNewFiber === null) {
+      resultingFirstChild = newFiber;
+    } else {
+      previousNewFiber.sibling = newFiber;
+    }
+    previousNewFiber = newFiber;
+    oldFiber = nextOldFiber;
+  }
+
+  // Phase 2: Handle remaining new children (insertions)
+  if (newIdx === newChildren.length) {
+    deleteRemainingChildren(returnFiber, oldFiber);
+    return resultingFirstChild;
+  }
+
+  // Phase 3: Handle remaining old children (deletions)
+  if (oldFiber === null) {
+    for (; newIdx < newChildren.length; newIdx++) {
+      const newFiber = createChild(returnFiber, newChildren[newIdx], lanes);
+      if (newFiber === null) continue;
+
+      lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
+      
+      if (previousNewFiber === null) {
+        resultingFirstChild = newFiber;
+      } else {
+        previousNewFiber.sibling = newFiber;
+      }
+      previousNewFiber = newFiber;
+    }
+    return resultingFirstChild;
+  }
+
+  // Phase 4: Handle moves using key map
+  const existingChildren = mapRemainingChildren(returnFiber, oldFiber);
+
+  for (; newIdx < newChildren.length; newIdx++) {
+    const newFiber = updateFromMap(
+      existingChildren,
+      returnFiber,
+      newIdx,
+      newChildren[newIdx],
+      lanes
+    );
+
+    if (newFiber !== null) {
+      if (shouldTrackSideEffects) {
+        if (newFiber.alternate !== null) {
+          existingChildren.delete(
+            newFiber.key === null ? newIdx : newFiber.key
+          );
+        }
+      }
+
+      lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
+      
+      if (previousNewFiber === null) {
+        resultingFirstChild = newFiber;
+      } else {
+        previousNewFiber.sibling = newFiber;
+      }
+      previousNewFiber = newFiber;
+    }
+  }
+
+  // Delete remaining old children
+  if (shouldTrackSideEffects) {
+    existingChildren.forEach(child => deleteChild(returnFiber, child));
+  }
+
+  return resultingFirstChild;
+}
+```
+
+### 4. Detailed Diff Scenarios
+
+#### 4.1 Scenario 1: Simple Updates
+
+**Before:**
+```jsx
+<div>
+  <span>Hello</span>
+  <p>World</p>
+</div>
+```
+
+**After:**
+```jsx
+<div>
+  <span>Hi</span>
+  <p>World</p>
+</div>
+```
+
+```mermaid
+flowchart LR
+    A[div] --> B[span: 'Hello']
+    A --> C[p: 'World']
+    
+    D[div] --> E[span: 'Hi']
+    D --> F[p: 'World']
+    
+    B -.->|Update Text| E
+    C -.->|No Change| F
+    
+    style E fill:#4ecdc4
+    style F fill:#90EE90
+```
+
+**Diff Process:**
+1. Compare `div` elements - same type, reuse
+2. Compare `span` children - same type, update text content
+3. Compare `p` children - same type and content, no change needed
+
+#### 4.2 Scenario 2: Element Type Changes
+
+**Before:**
+```jsx
+<div>
+  <span>Text</span>
+</div>
+```
+
+**After:**
+```jsx
+<div>
+  <p>Text</p>
+</div>
+```
+
+```mermaid
+flowchart LR
+    A[div] --> B[span: 'Text']
+    
+    C[div] --> D[p: 'Text']
+    
+    B -.->|Delete| X[❌]
+    X -.->|Create| D
+    
+    style B fill:#ff6b6b
+    style D fill:#4ecdc4
+```
+
+**Diff Process:**
+1. Compare `div` elements - same type, reuse
+2. Compare children: `span` vs `p` - different types
+3. Delete `span` fiber and its subtree
+4. Create new `p` fiber with same content
+
+#### 4.3 Scenario 3: List Reordering with Keys
+
+**Before:**
+```jsx
+<ul>
+  <li key="a">Item A</li>
+  <li key="b">Item B</li>
+  <li key="c">Item C</li>
+</ul>
+```
+
+**After:**
+```jsx
+<ul>
+  <li key="c">Item C</li>
+  <li key="a">Item A</li>
+  <li key="b">Item B</li>
+</ul>
+```
+
+```mermaid
+flowchart TD
+    subgraph "Before"
+        A1[li key='a'] --> A2[li key='b'] --> A3[li key='c']
+    end
+    
+    subgraph "After"
+        B1[li key='c'] --> B2[li key='a'] --> B3[li key='b']
+    end
+    
+    subgraph "Key Map Phase"
+        C1[Map: a→fiber_a, b→fiber_b, c→fiber_c]
+    end
+    
+    A3 -.->|Move to position 0| B1
+    A1 -.->|Move to position 1| B2
+    A2 -.->|Move to position 2| B3
+    
+    style B1 fill:#45b7d1
+    style B2 fill:#45b7d1
+    style B3 fill:#45b7d1
+```
+
+**Diff Process:**
+1. Phase 1: No common prefix found (c ≠ a)
+2. Phase 2: Create key map: `{a: fiber_a, b: fiber_b, c: fiber_c}`
+3. Phase 3: For each new position:
+   - Position 0: Find key 'c' in map, move fiber_c
+   - Position 1: Find key 'a' in map, move fiber_a  
+   - Position 2: Find key 'b' in map, move fiber_b
+
+#### 4.4 Scenario 4: List with Insertions and Deletions
+
+**Before:**
+```jsx
+<ul>
+  <li key="a">Item A</li>
+  <li key="b">Item B</li>
+  <li key="d">Item D</li>
+</ul>
+```
+
+**After:**
+```jsx
+<ul>
+  <li key="a">Item A</li>
+  <li key="c">Item C</li>
+  <li key="d">Item D</li>
+  <li key="e">Item E</li>
+</ul>
+```
+
+```mermaid
+flowchart TD
+    subgraph "Operations"
+        A[Keep: li key='a'] 
+        B[Delete: li key='b'] 
+        C[Insert: li key='c']
+        D[Keep: li key='d']
+        E[Insert: li key='e']
+    end
+    
+    A --> C --> D --> E
+    B -.->|❌ Delete| X[Deleted]
+    
+    style A fill:#90EE90
+    style B fill:#ff6b6b
+    style C fill:#4ecdc4
+    style D fill:#90EE90
+    style E fill:#4ecdc4
+```
+
+**Diff Process:**
+1. Phase 1: Compare 'a' with 'a' - match, keep
+2. Phase 1: Compare 'b' with 'c' - no match, break to key map phase
+3. Key map phase:
+   - Create map: `{b: fiber_b, d: fiber_d}`
+   - Position 1: key 'c' not in map - create new fiber
+   - Position 2: key 'd' in map - reuse fiber_d
+   - Position 3: key 'e' not in map - create new fiber
+4. Delete remaining: fiber_b marked for deletion
+
+#### 4.5 Scenario 5: Fragment Handling
+
+**Before:**
+```jsx
+<div>
+  <span>A</span>
+  <span>B</span>
+</div>
+```
+
+**After:**
+```jsx
+<div>
+  <React.Fragment>
+    <span>A</span>
+    <p>C</p>
+  </React.Fragment>
+  <span>B</span>
+</div>
+```
+
+```mermaid
+flowchart TD
+    subgraph "Before"
+        A[div] --> B[span: A]
+        A --> C[span: B]
+    end
+    
+    subgraph "After"
+        D[div] --> E[Fragment]
+        E --> F[span: A]
+        E --> G[p: C]
+        D --> H[span: B]
+    end
+    
+    B -.->|Reuse| F
+    C -.->|Reuse| H
+    G -.->|Create| G
+    
+    style F fill:#90EE90
+    style G fill:#4ecdc4
+    style H fill:#90EE90
+```
+
+### 5. Performance Optimizations
+
+#### 5.1 Key-Based Optimization
+
+```javascript
+function placeChild(newFiber, lastPlacedIndex, newIndex) {
+  newFiber.index = newIndex;
+  
+  if (!shouldTrackSideEffects) {
+    return lastPlacedIndex;
+  }
+
+  const current = newFiber.alternate;
+  if (current !== null) {
+    const oldIndex = current.index;
+    if (oldIndex < lastPlacedIndex) {
+      // This is a move
+      newFiber.flags |= Placement;
+      return lastPlacedIndex;
+    } else {
+      // This item can stay in place
+      return oldIndex;
+    }
+  } else {
+    // This is an insertion
+    newFiber.flags |= Placement;
+    return lastPlacedIndex;
+  }
+}
+```
+
+#### 5.2 Bailout Optimizations
+
+```javascript
+function bailoutOnAlreadyFinishedWork(current, workInProgress, renderLanes) {
+  if (current !== null) {
+    workInProgress.dependencies = current.dependencies;
+  }
+
+  // Check if children have pending work
+  if (!includesSomeLane(renderLanes, workInProgress.childLanes)) {
+    // No pending work in subtree, can skip entirely
+    return null;
+  }
+
+  // Clone child fibers
+  cloneChildFibers(current, workInProgress);
+  return workInProgress.child;
+}
+```
+
+### 6. Edge Cases and Error Handling
+
+#### 6.1 Null and Undefined Children
+
+```javascript
+function reconcileChildFibers(returnFiber, currentFirstChild, newChild, lanes) {
+  // Handle null/undefined
+  if (newChild == null) {
+    return deleteRemainingChildren(returnFiber, currentFirstChild);
+  }
+
+  // Handle boolean values (render nothing)
+  if (typeof newChild === 'boolean') {
+    return deleteRemainingChildren(returnFiber, currentFirstChild);
+  }
+
+  // Continue with normal reconciliation...
+}
+```
+
+#### 6.2 Portal Handling
+
+```javascript
+function reconcilePortal(returnFiber, currentFirstChild, portal, lanes) {
+  const key = portal.key;
+  let child = currentFirstChild;
+
+  while (child !== null) {
+    if (child.key === key && child.tag === HostPortal) {
+      if (child.stateNode.containerInfo === portal.containerInfo) {
+        // Same portal, update children
+        deleteRemainingChildren(returnFiber, child.sibling);
+        const existing = useFiber(child, portal.children || []);
+        existing.return = returnFiber;
+        return existing;
+      } else {
+        // Different container, replace
+        deleteRemainingChildren(returnFiber, child);
+        break;
+      }
+    } else {
+      deleteChild(returnFiber, child);
+    }
+    child = child.sibling;
+  }
+
+  const created = createFiberFromPortal(portal, returnFiber.mode, lanes);
+  created.return = returnFiber;
+  return created;
+}
+```
+
+### 7. Diff Algorithm Complexity Analysis
+
+#### 7.1 Time Complexity
+
+| Scenario | Best Case | Average Case | Worst Case |
+|----------|-----------|--------------|------------|
+| Single Element | O(1) | O(1) | O(n) |
+| Array - No Keys | O(n) | O(n²) | O(n²) |
+| Array - With Keys | O(n) | O(n) | O(n²) |
+| Deep Tree | O(n) | O(n) | O(n) |
+
+#### 7.2 Space Complexity
+
+```javascript
+// Key map creation for large lists
+function mapRemainingChildren(returnFiber, currentFirstChild) {
+  const existingChildren = new Map();
+  let existingChild = currentFirstChild;
+  
+  while (existingChild !== null) {
+    if (existingChild.key !== null) {
+      existingChildren.set(existingChild.key, existingChild);
+    } else {
+      existingChildren.set(existingChild.index, existingChild);
+    }
+    existingChild = existingChild.sibling;
+  }
+  
+  return existingChildren; // O(n) space for n children
+}
+```
+
+### 8. Best Practices for Optimal Diff Performance
+
+#### 8.1 Key Usage Guidelines
+
+```javascript
+// ✅ Good: Stable, unique keys
+const items = data.map(item => (
+  <Item key={item.id} data={item} />
+));
+
+// ❌ Bad: Array indices as keys (breaks reordering optimization)
+const items = data.map((item, index) => (
+  <Item key={index} data={item} />
+));
+
+// ❌ Bad: Non-unique keys
+const items = data.map(item => (
+  <Item key={item.category} data={item} />
+));
+```
+
+#### 8.2 Component Structure Optimization
+
+```javascript
+// ✅ Good: Stable component structure
+function OptimizedList({ items, filter }) {
+  const filteredItems = useMemo(() => 
+    items.filter(item => item.category === filter), 
+    [items, filter]
+  );
+  
+  return (
+    <ul>
+      {filteredItems.map(item => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+
+// ❌ Bad: Conditional rendering changes structure
+function UnoptimizedList({ items, showHeader }) {
+  return (
+    <div>
+      {showHeader && <h2>Items</h2>}
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 ```
 
@@ -2036,7 +3521,7 @@ function App() {
     <div>
       <Suspense fallback={<div>Loading...</div>}>
         <LazyComponent />
-      </Suspense>
+      </Suspense>                               
     </div>
   );
 }
