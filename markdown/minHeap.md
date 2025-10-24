@@ -2,49 +2,48 @@
  * @Author: changcheng
  * @LastEditTime: 2023-10-09 21:27:27
 -->
-### 最小堆
+### Min Heap
 
-1. 最小堆是一种经过排序的完全二叉树
+1. A min heap is a sorted complete binary tree
 
-2. 其中任一非终端节点的数据值均不大于其左子节点和右子节点的值
+2. The data value of any non-terminal node is not greater than the value of its left and right child nodes
 
-3. 根结点值是所有堆结点值中最小者
+3. The root node value is the smallest among all heap node values
 
-索引关系
+Index relationships
 
-+ 左子节点索引=(父节点索引*2)+1
++ Left child index = (parent index * 2) + 1
 
-+ 右子节点索引=左子节点索引+1
++ Right child index = left child index + 1
 
-+ 父节点索引=(子节点索引-1)/2
-
-![avatar](../img/zui_xiao_dui_1_1643275468911.jpeg)
++ Parent index = (child index - 1) / 2
 
 
-### 为什要用最小堆
 
-1. 这是因为在最小堆结构中，最小值就在第一个，React 可以快速的取出最小值。
+### Why use min heap
 
-2. React 为什么要取出最小值而不是最大值呢？我们可以这样设想，React 将更新任务拆成多个小任务，每个小任务的数据结构是一个带着 expirationTime 的对象，expirationTime 表示这个任务的过期时间，expirationTime 越小就表示过期时间越近，该任务的优先级就越高，取出最小值就相当于取出优先级最高的任务。
+1. This is because in the min heap structure, the minimum value is at the first position, and React can quickly extract the minimum value.
 
-
-### 最小堆调度
+2. Why does React extract the minimum value instead of the maximum value? We can think of it this way: React breaks update tasks into multiple small tasks, each small task's data structure is an object with expirationTime, where expirationTime represents the expiration time of this task. The smaller the expirationTime, the closer the expiration time, and the higher the priority of the task. Extracting the minimum value is equivalent to extracting the highest priority task.
 
 
-1. peek() 查看堆的顶点
+### Min heap scheduling
 
-2. pop() 弹出堆的定点后需要调用siftDown函数向下调整堆
 
-3. push() 添加新节点后需要调用siftUp函数向上调整堆
+1. peek() View the top of the heap
 
-4. siftDown() 向下调整堆结构, 保证最小堆
+2. pop() After popping the top of the heap, need to call siftDown function to adjust the heap downward
 
-5. siftUp() 需要向上调整堆结构, 保证最小堆
+3. push() After adding a new node, need to call siftUp function to adjust the heap upward
+
+4. siftDown() Adjust heap structure downward to ensure min heap
+
+5. siftUp() Need to adjust heap structure upward to ensure min heap
 
 ```javaScript
 //scheduler/src/SchedulerMinHeap.js
 /**
- * 添加一个节点
+ * Add a node
  * @param {*} heap 
  * @param {*} node 
  */
@@ -54,7 +53,7 @@ export function push(heap, node) {
   siftUp(heap, node, index);
 }
 /**
- * 查看堆顶节点
+ * View the top node of the heap
  * @param {*} heap 
  * @returns 
  */
@@ -62,7 +61,7 @@ export function peek(heap) {
   return heap.length === 0 ? null : heap[0];
 }
 /**
- * 弹出堆顶节点
+ * Pop the top node of the heap
  * @param {*} heap 
  * @returns 
  */
@@ -70,91 +69,91 @@ export function pop(heap) {
   if (heap.length === 0) {
     return null;
   }
-  // 取出第一个元素，也就是堆顶元素
+  // Take out the first element, which is the top element of the heap
   const first = heap[0];
-  // 取出最后一个，也就是堆尾元素
+  // Take out the last element, which is the tail element of the heap
   const last = heap.pop();
   if (last !== first) {
-    // 堆顶，堆尾交换位置，然后从堆顶向下调整
+    // Swap the top and tail of the heap, then adjust downward from the top
     heap[0] = last;
     siftDown(heap, last, 0);
   }
   return first;
 }
 /**
- * 向上调整某个节点，让其在正确位置
- * @param {*} heap 最小堆
- * @param {*} node 节点
- * @param {*} i 索引
+ * Adjust a node upward to put it in the correct position
+ * @param {*} heap min heap
+ * @param {*} node node
+ * @param {*} i index
  * @returns 
  */
 function siftUp(heap, node, i) {
   let index = i;
   while (index > 0) {
-    // 拿到父的索引 (子节点-1)/2和这个向右移是等价的，这种写法好处是直接取整
+    // Get parent index (child-1)/2 is equivalent to right shift, this way of writing has the advantage of direct rounding
     const parentIndex = index - 1 >>> 1;
-    // 拿到父节点
+    // Get parent node
     const parent = heap[parentIndex];
-    // 父节点比子节点大
+    // Parent node is larger than child node
     if (compare(parent, node) > 0) {
-      // 把儿子的值给父索引
+      // Put child's value to parent index
       heap[parentIndex] = node;
-      // 把父亲的值给子索引
+      // Put parent's value to child index
       heap[index] = parent;
-      // 让index = 父索引
+      // Let index = parent index
       index = parentIndex;
     } else {
-      // 子节点比父节点大
+      // Child node is larger than parent node
       return;
     }
   }
 }
 /**
- * 向下调整某个节点，让其在正确位置
- * @param {*} heap 最小堆
- * @param {*} node 节点
- * @param {*} i 索引
+ * Adjust a node downward to put it in the correct position
+ * @param {*} heap min heap
+ * @param {*} node node
+ * @param {*} i index
  * @returns 
  */
 function siftDown(heap, node, i) {
   let index = i;
   const length = heap.length;
-  // 类似于二分查找，但是这里是排序
+  // Similar to binary search, but this is sorting
   const halfLength = length >>> 1;
   while (index < halfLength) {
-    // 左索引
+    // Left index
     const leftIndex = (index + 1) * 2 - 1;
-    // 左子节点
+    // Left child node
     const left = heap[leftIndex];
-    // 右索引
+    // Right index
     const rightIndex = leftIndex + 1;
-    // 右节点
+    // Right node
     const right = heap[rightIndex];
-    // 比较进行移动 index
+    // Compare and move index
     if (compare(left, node) < 0) {
-     // 右节点比左节点小，父节点和右节点进行交换
+     // Right node is smaller than left node, swap parent and right node
       if (rightIndex < length && compare(right, left) < 0) {
-        // 当前索引为右节点
+        // Current index is right node
         heap[index] = right;
-        // 右索引设置为父节点
+        // Right index set as parent node
         heap[rightIndex] = node;
-        // 索引等于右索引
+        // Index equals right index
         index = rightIndex;
       } else {
-        // 当前索引设置为左节点
+        // Current index set as left node
         heap[index] = left;
-        // 左索引设置为父节点
+        // Left index set as parent node
         heap[leftIndex] = node;
-        // 索引等于左索引
+        // Index equals left index
         index = leftIndex;
       }
-    // 右节点小于父节点
+    // Right node is smaller than parent node
     } else if (rightIndex < length && compare(right, node) < 0) {
-      // 当前索引为右节点
+      // Current index is right node
       heap[index] = right;
-      // 右索引为父节点
+      // Right index is parent node
       heap[rightIndex] = node;
-      // 索引设置为右索引
+      // Index set as right index
       index = rightIndex;
     } else {
       return;

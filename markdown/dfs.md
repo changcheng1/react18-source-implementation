@@ -3,18 +3,18 @@
  * @LastEditTime: 2023-08-02 14:11:22
 -->
 
-### Fiber 采用深度优先遍历（先进后出）
+### Fiber uses depth-first traversal (last in, first out)
 
-深度优先搜索英文缩写为 DFS 即 Depth First Search
+Depth-first search is abbreviated as DFS, which stands for Depth First Search
 
-其过程简要来说是对每一个可能的分支路径深入到不能再深入为止，而且每个节点只能访问一次
-应用场景
+The process is to go as deep as possible along each possible branch path, and each node can only be visited once
+Application scenarios
 
-React 虚拟 DOM 的构建
+React virtual DOM construction
 
-React 的 fiber 树构建
+React fiber tree construction
 
-优点：内存占用少，缺点：深度情况很深的情况效率不高
+Advantages: Low memory usage, Disadvantages: Inefficient when depth is very deep
 
 ```javaScript
 let root = {
@@ -37,13 +37,13 @@ function dfs(node) {
 dfs(root);
 ```
 
-### 广度优先(BFS)（先进先出）
+### Breadth-first (BFS) (first in, first out)
 
-度优先搜索算法（又称广度优先搜索），其英文全称是 Breadth First Search
+Breadth-first search algorithm (also known as breadth-first search), its full English name is Breadth First Search
 
-算法首先搜索距离为 k 的所有顶点，然后再去搜索距离为 k+l 的其他顶点
+The algorithm first searches all vertices at distance k, then searches other vertices at distance k+1
 
-优点：寻找深度小，缺点就是内存占用大
+Advantages: Small search depth, Disadvantages: High memory usage
 
 ```javaScript
 let root = {
